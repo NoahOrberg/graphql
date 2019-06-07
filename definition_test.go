@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/graphql-go/graphql"
-	"github.com/graphql-go/graphql/testutil"
+	"github.com/NoahOrberg/graphql"
+	"github.com/NoahOrberg/graphql/testutil"
 )
 
 var blogImage = graphql.NewObject(graphql.ObjectConfig{

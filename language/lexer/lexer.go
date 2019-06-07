@@ -86,6 +86,7 @@ type Token struct {
 	Kind  TokenKind
 	Start int
 	End   int
+	Line  int
 	Value string
 }
 
@@ -110,7 +111,7 @@ func Lex(s *source.Source) Lexer {
 // [_A-Za-z][_0-9A-Za-z]*
 // position: Points to the byte position in the byte array
 // runePosition: Points to the rune position in the byte array
-func readName(source *source.Source, position, runePosition int) Token {
+func readName(source *source.Source, position, runePosition, fromLine int) Token {
 	body := source.Body
 	bodyLength := len(body)
 	endByte := position + 1
@@ -129,14 +130,14 @@ func readName(source *source.Source, position, runePosition int) Token {
 			break
 		}
 	}
-	return makeToken(NAME, runePosition, endRune, string(body[position:endByte]))
+	return makeToken(NAME, runePosition, endRune, fromLine, string(body[position:endByte]))
 }
 
 // Reads a number token from the source file, either a float
 // or an int depending on whether a decimal point appears.
 // Int:   -?(0|[1-9][0-9]*)
 // Float: -?(0|[1-9][0-9]*)(\.[0-9]+)?((E|e)(+|-)?[0-9]+)?
-func readNumber(s *source.Source, start int, firstCode rune, codeLength int) (Token, error) {
+func readNumber(s *source.Source, start int, firstCode rune, codeLength int, fromLine int) (Token, error) {
 	code := firstCode
 	body := s.Body
 	position := start
@@ -190,7 +191,7 @@ func readNumber(s *source.Source, start int, firstCode rune, codeLength int) (To
 		kind = FLOAT
 	}
 
-	return makeToken(kind, start, position, string(body[start:position])), nil
+	return makeToken(kind, start, position, fromLine, string(body[start:position])), nil
 }
 
 // Returns the new position in the source after reading digits.
@@ -215,7 +216,7 @@ func readDigits(s *source.Source, start int, firstCode rune, codeLength int) (in
 	return position, gqlerrors.NewSyntaxError(s, position, description)
 }
 
-func readString(s *source.Source, start int) (Token, error) {
+func readString(s *source.Source, start, fromLine int) (Token, error) {
 	body := s.Body
 	position := start + 1
 	runePosition := start + 1
@@ -306,13 +307,13 @@ func readString(s *source.Source, start int) (Token, error) {
 	stringContent := body[chunkStart:position]
 	valueBuffer.Write(stringContent)
 	value := valueBuffer.String()
-	return makeToken(STRING, start, position+1, value), nil
+	return makeToken(STRING, start, position+1, fromLine, value), nil
 }
 
 // readBlockString reads a block string token from the source file.
 //
 // """("?"?(\\"""|\\(?!=""")|[^"\\]))*"""
-func readBlockString(s *source.Source, start int) (Token, error) {
+func readBlockString(s *source.Source, start int, fromLine int) (Token, error) {
 	body := s.Body
 	position := start + 3
 	runePosition := start + 3
@@ -335,7 +336,7 @@ func readBlockString(s *source.Source, start int) (Token, error) {
 				stringContent := body[chunkStart:position]
 				valueBuffer.Write(stringContent)
 				value := blockStringValue(valueBuffer.String())
-				return makeToken(BLOCK_STRING, start, position+3, value), nil
+				return makeToken(BLOCK_STRING, start, position+3, fromLine, value), nil
 			}
 		}
 
@@ -462,8 +463,8 @@ func char2hex(a rune) int {
 	return -1
 }
 
-func makeToken(kind TokenKind, start int, end int, value string) Token {
-	return Token{Kind: kind, Start: start, End: end, Value: value}
+func makeToken(kind TokenKind, start int, end int, line int, value string) Token {
+	return Token{Kind: kind, Start: start, End: end, Line: line, Value: value}
 }
 
 func printCharCode(code rune) string {
@@ -479,12 +480,12 @@ func printCharCode(code rune) string {
 	return fmt.Sprintf(`"\\u%04X"`, code)
 }
 
-func readToken(s *source.Source, fromPosition int) (Token, error) {
+func readToken(s *source.Source, fromPosition int, fromLine int) (Token, error) {
 	body := s.Body
 	bodyLength := len(body)
 	position, runePosition := positionAfterWhitespace(body, fromPosition)
 	if position >= bodyLength {
-		return makeToken(EOF, position, position, ""), nil
+		return makeToken(EOF, position, position, 0, ""), nil
 	}
 	code, codeLength := runeAt(body, position)
 
@@ -496,64 +497,64 @@ func readToken(s *source.Source, fromPosition int) (Token, error) {
 	switch code {
 	// !
 	case '!':
-		return makeToken(BANG, position, position+1, ""), nil
+		return makeToken(BANG, position, position+1, fromLine, ""), nil
 	// $
 	case '$':
-		return makeToken(DOLLAR, position, position+1, ""), nil
+		return makeToken(DOLLAR, position, position+1, fromLine, ""), nil
 	// &
 	case '&':
-		return makeToken(AMP, position, position+1, ""), nil
+		return makeToken(AMP, position, position+1, fromLine, ""), nil
 	// (
 	case '(':
-		return makeToken(PAREN_L, position, position+1, ""), nil
+		return makeToken(PAREN_L, position, position+1, fromLine, ""), nil
 	// )
 	case ')':
-		return makeToken(PAREN_R, position, position+1, ""), nil
+		return makeToken(PAREN_R, position, position+1, fromLine, ""), nil
 	// .
 	case '.':
 		next1, _ := runeAt(body, position+1)
 		next2, _ := runeAt(body, position+2)
 		if next1 == '.' && next2 == '.' {
-			return makeToken(SPREAD, position, position+3, ""), nil
+			return makeToken(SPREAD, position, position+3, fromLine, ""), nil
 		}
 		break
 	// :
 	case ':':
-		return makeToken(COLON, position, position+1, ""), nil
+		return makeToken(COLON, position, position+1, fromLine, ""), nil
 	// =
 	case '=':
-		return makeToken(EQUALS, position, position+1, ""), nil
+		return makeToken(EQUALS, position, position+1, fromLine, ""), nil
 	// @
 	case '@':
-		return makeToken(AT, position, position+1, ""), nil
+		return makeToken(AT, position, position+1, fromLine, ""), nil
 	// [
 	case '[':
-		return makeToken(BRACKET_L, position, position+1, ""), nil
+		return makeToken(BRACKET_L, position, position+1, fromLine, ""), nil
 	// ]
 	case ']':
-		return makeToken(BRACKET_R, position, position+1, ""), nil
+		return makeToken(BRACKET_R, position, position+1, fromLine, ""), nil
 	// {
 	case '{':
-		return makeToken(BRACE_L, position, position+1, ""), nil
+		return makeToken(BRACE_L, position, position+1, fromLine, ""), nil
 	// |
 	case '|':
-		return makeToken(PIPE, position, position+1, ""), nil
+		return makeToken(PIPE, position, position+1, fromLine, ""), nil
 	// }
 	case '}':
-		return makeToken(BRACE_R, position, position+1, ""), nil
+		return makeToken(BRACE_R, position, position+1, fromLine, ""), nil
 	// A-Z
 	case 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N',
 		'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z':
-		return readName(s, position, runePosition), nil
+		return readName(s, position, runePosition, fromLine), nil
 	// _
 	// a-z
 	case '_', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n',
 		'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z':
-		return readName(s, position, runePosition), nil
+		return readName(s, position, runePosition, fromLine), nil
 	// -
 	// 0-9
 	case '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
-		token, err := readNumber(s, position, code, codeLength)
+		token, err := readNumber(s, position, code, codeLength, fromLine)
 		if err != nil {
 			return token, err
 		}
@@ -565,9 +566,9 @@ func readToken(s *source.Source, fromPosition int) (Token, error) {
 		x, _ := runeAt(body, position+1)
 		y, _ := runeAt(body, position+2)
 		if x == '"' && y == '"' {
-			token, err = readBlockString(s, position)
+			token, err = readBlockString(s, position, fromLine)
 		} else {
-			token, err = readString(s, position)
+			token, err = readString(s, position, fromLine)
 		}
 		return token, err
 	}
